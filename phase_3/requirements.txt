@@ -1,0 +1,15 @@
+# Drift-Sense Phase 3 — pinned runtime dependencies.
+# No network access is needed or attempted at runtime.
+#
+#   python -m pip install -r requirements.txt
+#
+# These are the exact versions every number in results/ was measured with:
+# Python 3.12, CPU only, 4 threads. The training notebooks use the CUDA build of the
+# same torch release; nothing else differs.
+numpy==2.5.2
+opencv-python-headless==5.0.0.93
+torch==2.13.0+cpu
+gdstk==0.9.60
+
+# gdstk is needed only to READ the .gds inputs. torch runs the re-ranker and the FFT
+# correlations; the pipeline is CPU-only at inference and never calls out to a network.
