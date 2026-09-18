@@ -27,6 +27,51 @@ both perfect there, and the worst pair is 1.79 px.
 Efficiency: **0.86–0.95 s median**, 1.06 s worst, against a 5 s median budget and a 20 s
 hard timeout, on 4 CPU threads.
 
+## How it works
+
+![Method](method.png)
+
+Every panel in `method.png` is a real intermediate of the shipped model on one of the
+organisers' pairs — the two SEM images, the size of the problem (the reference is ~83 px of
+a 1000 px field), the ZNCC surface at the winning pose, the 64 candidates the search
+actually proposed, and the prediction against the truth.
+
+Both sides are SEM images, so unlike Phase 3 there is no design file and nothing to infer
+about per-layer brightness. What makes it hard instead is **scan drift**: each row of the
+search is warped by a different amount, so the two images are never a rigid translation of
+one another and a plain correlation peak is not enough.
+
+1. **Candidate search.** Band-matched ZNCC of the reference against the search over a 5×5
+   zoom/rotation grid, by FFT correlation. The top K=64 peaks survive non-maximum
+   suppression.
+2. **Re-ranking.** A cross-encoder scores all 64 jointly. Its logit is
+   `head(e) + α·classical_score` with the head zero-initialised, so training learns a
+   correction to the classical ranking rather than replacing it.
+3. **Refinement.** Sub-pixel peak interpolation, then three levels over translation, zoom
+   and rotation.
+4. **Presence.** A head over the pose-surface statistics — peak, margin, entropy, std, PSR
+   — Platt-calibrated with an F1-optimal threshold, both saved in the checkpoint.
+
+Measured: training was worth **+0.9 localization and +0.6 pose** on held-out data. Its real
+contribution is rejection, which an uncalibrated head cannot do at all. `METHODS.md` has
+the sweeps behind every setting.
+
+## Every pair, at a glance
+
+![Predictions on the organisers' 25-pair set](results_25pair_sheet.png)
+
+`results_25pair_sheet.png` — all 25 pairs with the ground truth (thick yellow box, red
+cross) and our prediction (thin cyan box, cyan cross) drawn on the same search image. The
+cyan sits inside the yellow on every present pair, which is what a median error of 0.42 px
+looks like. Each tile carries its architecture, the true zoom and rotation, and our error,
+recovered pose and found flag. Green frames mark the pairs handled correctly — **25 of 25**,
+including all five absent sites, each rejected with score 0.001.
+
+The bottom row is the interesting part: the two `D optical` pairs are 3-channel colour
+captures rather than SEM greyscale, matched on luminance, at 0.23 and 0.26 px. The three
+`B degraded L4` pairs next to them are the harshest noise level in the set and still land
+inside 1.10 px.
+
 ## Which model, and why
 
 Three variants were trained. All three were then put through the *same* two test sets —
@@ -52,26 +97,6 @@ gradients** on validation in all three runs, so every checkpoint carries
 `edge_choice='classical'`. The learned-vs-classical switch is what kept that from costing
 anything.
 
-## How it works
-
-Both sides are SEM images, so unlike Phase 3 there is no design file and nothing to infer
-about per-layer brightness.
-
-1. **Candidate search.** The reference is correlated against the search over a 5×5 grid of
-   zoom and rotation, as band-matched ZNCC in the Fourier domain, and the top K=64
-   candidates are kept with non-maximum suppression.
-2. **Re-ranking.** A cross-encoder scores all 64 candidates jointly from their patch pairs
-   and similarity statistics. Its logit is `head(e) + alpha · classical_score`, so the
-   trained head is a learned correction on top of the classical ranking rather than a
-   replacement for it.
-3. **Refinement.** Sub-pixel peak interpolation, then three refinement levels over
-   translation, zoom and rotation.
-4. **Presence.** A head over the pose-surface statistics (peak, margin, entropy, std, PSR),
-   Platt-calibrated with an F1-optimal threshold — both stored in the checkpoint, so the
-   `--threshold` default comes from the bundle rather than this script.
-
-`METHODS.md` has the measurements behind the settings.
-
 ## Layout
 
 ```
@@ -80,6 +105,8 @@ score.py          rubric scorer
 src/dsr_core.py   candidate search, re-ranker, refinement, rubric
 weights/          model_best.pt — the shipped intensity model (3.5 MB)
 results/          the predictions behind the table above
+method.png        the pipeline walked through on a real pair
+results_25pair_sheet.png   all 25 pairs with truth and prediction drawn on each
 METHODS.md        method and measurements
 requirements.txt  three pinned dependencies
 ```

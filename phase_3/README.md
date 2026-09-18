@@ -19,6 +19,34 @@ python score.py --truth <dataset>/ground_truth.csv --pred predictions.csv
 
 ---
 
+## How it works
+
+![Method](method.png)
+
+Every panel in `method.png` is a real intermediate of the shipped pipeline on one pair —
+the two GDS files rasterised, the SEM capture, the whole-field fit and its residual, the
+CAD-to-CAD correlation surface, the per-layer edge basis, and the prediction against the
+truth. The three steps are:
+
+1. **Pose from the whole field.** `search.gds` covers the entire search image, so zoom and
+   rotation are a least-squares fit over all 1,000,000 pixels, solving the 8 per-layer greys
+   at every candidate pose. Scale credit 1.000, median scale error 0.02%.
+2. **Location from geometry.** Both CADs share a frame, so finding the reference design
+   inside the search design is noise-free — no SEM involved. Multi-peak with NMS; a
+   near-equal runner-up marks a genuine design repeat and lowers confidence.
+3. **Match on edges.** A per-layer *signed* dx/dy gradient fit. A flat "all boundaries
+   equal" map is the wrong template, because a real SEM's step at a boundary depends on
+   which two layers meet there. Per-layer fitting was worth +21.7 points over flat, and
+   signed over magnitude a further +6.8.
+
+Brightness never drives the match. The per-layer grey fit is computed — with no grey ever
+assumed, the 8 levels and a background offset are unknowns recovered from the image — and
+its R² and residual feed the **confidence score**, which is what calibration is scored on.
+
+`METHODS.md` has the measurements behind each step, including what was tried and rejected.
+
+---
+
 ## Measured
 
 | set | pairs | total /85 | localization /40 | pose /20 | rejection /15 | calibration /10 | s/pair |
@@ -50,27 +78,6 @@ the pixel. There is no seed dependence and no trained weight file — this is a 
 geometric method, with the network wired in as a learned correction that is currently
 identity.
 
-## How it works
-
-1. **Pose, from the whole field.** `search.gds` covers the entire search image, so zoom and
-   rotation come from a least-squares fit over all 1000×1000 pixels, solving the 8
-   per-layer greys at every candidate pose. Scale credit 1.000, median scale error 0.02%.
-2. **Location, from geometry.** Both CADs share a frame, so finding the reference design
-   inside the search design is a noise-free translation search — no SEM involved.
-   Multi-peak with NMS; a near-equal runner-up marks a genuine design repeat and lowers
-   confidence.
-3. **Registration on edges**, as the spec asks: a per-layer *signed* dx/dy gradient fit.
-   A flat "all boundaries equal" CAD map is the wrong template, because a real SEM's step
-   at a boundary depends on which two layers meet there. Per-layer fitting was worth
-   +21.7 points over flat, and signed over magnitude a further +6.8.
-4. **Brightness drives the score, not the match.** The per-layer grey fit ("yield raster")
-   is solved with no grey ever assumed — the 8 levels and a background offset are unknowns
-   recovered from the image. Its R² and residual feed the confidence column, which is what
-   calibration is scored on.
-5. **Sub-pixel refinement** at the fixed global pose, translation only.
-
-`METHODS.md` has the measurements behind each step, including what was tried and rejected.
-
 ## Layout
 
 ```
@@ -79,6 +86,7 @@ score.py          rubric scorer
 src/dsr_core.py   candidate search, re-ranker, refinement, rubric
 src/p3_data.py    CAD geometry, global pose fit, load_pair
 results/          the predictions behind the table above
+method.png        the pipeline walked through on a real pair
 weights/          optional model_best.pt; picked up automatically if dropped in
 METHODS.md        method and measurements
 NOTES.md          the ground-truth convention, and open questions for the organisers
