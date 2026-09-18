@@ -908,7 +908,8 @@ class StageA:
             cc, sc = (cs - 1) / 2.0, (SEARCH_PX - 1) / 2.0
             sx, sy = gdsg.get('shift', (0.0, 0.0))
             n = sizes.get(0, cfg['patch'])
-            for (x0, y0, sig) in gdsg['peaks']:
+            lock_key = None
+            for k_, (x0, y0, sig) in enumerate(gdsg['peaks']):
                 X, Y = x0 + (REF_PX - 1) / 2.0 - cc, y0 + (REF_PX - 1) / 2.0 - cc
                 px, py = (c_ * X + s_ * Y) / z0 + sc + sx, (-s_ * X + c_ * Y) / z0 + sc + sy
                 iy_, ix_ = int(round(py - (n - 1) / 2.0)), int(round(px - (n - 1) / 2.0))
@@ -919,6 +920,8 @@ class StageA:
                     seen.add(key)
                     chosen.insert(0, key)
                 cad_idx[key] = sig / max(float(gdsg['top_sigma']), 1e-9)
+                if k_ == gdsg.get('lock'):
+                    lock_key = key
             chosen = chosen[:K]
         valid = np.zeros(K, np.float32)
         valid[:len(chosen)] = 1.0
@@ -981,6 +984,10 @@ class StageA:
                    greys=(self.greys.cpu() if self.greys is not None else None))
         out.update(self._labels(gt, out['cand'], valid))
         out['gmode'] = gmode
+        # when the design file identifies the copy exactly (p3_data.fine_match), that
+        # candidate is the answer and the SEM only refines its position
+        out['cad_lock'] = (chosen.index(lock_key) if gmode and lock_key is not None
+                           and lock_key in chosen else None)
         self.poses = full_poses
         return out
 
@@ -1441,6 +1448,10 @@ def predict(model, stagea, item, prepared=None, do_refine=True, platt=(1.0, 0.0)
     out = model(b)
     model.train(was)
     j = int(out['logit'][0].argmax())
+    if prepared.get('cad_lock') is not None:
+        # an exact 1 nm design match outranks SEM similarity: in a noisy image a 93-97%
+        # similar layout looks the same, and ranking on it picked a near-copy 4 times in 26
+        j = int(prepared['cad_lock'])
     cand = prepared['cand'][j].copy()
     if 'offset' in out and not prepared.get('gmode'):
         zs = cfg['zooms'][1] - cfg['zooms'][0] if len(cfg['zooms']) > 1 else 1.0
@@ -1493,6 +1504,13 @@ def rubric(records):
     s = np.array([r['score'] for r in gray])
     y = np.array([r['present'] > 0.5 for r in gray])
     f1, thr = best_f1(s, y)
+    f1_oracle = f1
+    if gray and all('found' in r for r in gray):
+        # the spec scores "F1 on the found flag" -- the flag we actually output, not the best
+        # threshold chosen after seeing the answers (best_f1), which overstated rejection
+        fl = np.array([bool(r['found']) for r in gray])
+        tp, fp, fn = int((fl & y).sum()), int((fl & ~y).sum()), int((~fl & y).sum())
+        f1 = 2 * tp / max(2 * tp + fp + fn, 1)
     auc = roc_auc(s, y)
     nz = lambda v: 0.0 if (v is None or v != v) else v
     out = dict(n=len(records), loc_credit=float(np.mean(locs)) if locs else float('nan'),
@@ -1500,7 +1518,7 @@ def rubric(records):
                median_err=float(np.median(errs)) if errs else float('nan'),
                scale_credit=float(np.mean(scs)) if scs else float('nan'),
                theta_credit=float(np.mean(ths)) if ths else float('nan'),
-               rejection_f1=f1, threshold=thr, roc_auc=auc)
+               rejection_f1=f1, rejection_f1_oracle=f1_oracle, threshold=thr, roc_auc=auc)
     out['pose_credit'] = float(np.nanmean([out['scale_credit'], out['theta_credit']])) if pres else float('nan')
     out['points'] = round(40 * nz(out['loc_credit']) + 20 * nz(out['pose_credit']) + 15 * f1 + 10 * nz(auc), 3)
     # presence broken down: the pooled AUC hides which absent/present kinds fail

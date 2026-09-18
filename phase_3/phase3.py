@@ -43,13 +43,12 @@ WEIGHTS = os.path.join(HERE, 'weights', 'model_best.pt')
 PER_PAIR_TIMEOUT_S = 18.0        # the rubric's hard timeout is 20 s; leave margin
 DEFAULT_THREADS = 4
 
-# Found cutoff for the untrained fallback's geometry score. Swept over all 74 pairs of
-# dataset/ + dataset_reject/ (58 present, 16 absent): F1 0.991 here, with every present
-# pair kept and one false alarm. The classes are nearly separated -- absent scores run
-# 0.001-0.959, present 0.638-7.566 -- so this sits just under the present floor. Higher
-# values only throw present pairs away (F1 0.973 at 1.0, 0.792 at 3.0). With trained
-# weights the bundle's own Platt-calibrated, F1-optimal threshold is used instead.
-DEFAULT_GEOMETRY_THR = 0.5
+# Found cutoff on the presence score: the fraction of the reference's 1 nm design the search
+# design reproduces at the best CAD peak. Chosen on DEVELOPMENT sets only -- 24 i4c pairs
+# with rotation off, 24 with rotation on, and our 24-pair absent-heavy set -- never on the
+# test sets it is later scored on. There the classes do not overlap: present pairs 0.9993 to
+# 1.0000, absent pairs 0.7440 to 0.8981. 0.95 sits in the gap.
+DEFAULT_GEOMETRY_THR = 0.95
 
 # Method 2 of the four trained variants: global pose + per-layer dx/dy edge fit +
 # tone map. Cold (untrained) on 50 held-out generated pairs: 84.19 of 85, with
@@ -99,6 +98,13 @@ def _geometry_score(item):
     noise-free: a strong peak with no rival means present, many near-equal rivals or a
     weak peak means the site is not there. Measured untrained: F1 0.959-0.973."""
     g = item.get('gdsg')
+    if g and g.get('fine_best') is not None:
+        # How much of the reference's 1 nm design the search design reproduces at the best
+        # CAD peak (p3_data.fine_match). Present: the true copy matches exactly. Absent: the
+        # reference came from elsewhere and nothing reproduces it. This replaced
+        # top_sigma * (1 - runner_up), which read similar-but-different layouts as "the design
+        # repeats" and rejected 7 of 26 present pairs on the organisers' generator.
+        return float(g['fine_best'])
     if g:
         return float(g['top_sigma']) * (1.0 - float(g['runner_up']))
     pr = item.get('prior')
