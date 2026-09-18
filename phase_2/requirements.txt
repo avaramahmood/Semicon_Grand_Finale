@@ -1,4 +1,4 @@
-# Drift-Sense Phase 2 revised — pinned runtime dependencies.
+# Drift-Sense Phase 2 — pinned runtime dependencies.
 # No network access is needed or attempted at runtime.
 #
 #   python -m pip install -r requirements.txt
@@ -6,6 +6,11 @@
 # These are the exact versions every number in results/ was measured with:
 # Python 3.12, CPU only, 4 threads. The training notebooks use the CUDA build of the
 # same torch release; nothing else differs.
+# torch's CPU-only build (the +cpu tag below) is published only on PyTorch's own
+# index, not on PyPI, so pip is pointed at it. Without this line the install fails
+# on a clean machine with "No matching distribution found for torch==2.13.0+cpu".
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 numpy==2.5.2
 opencv-python-headless==5.0.0.93
 torch==2.13.0+cpu
