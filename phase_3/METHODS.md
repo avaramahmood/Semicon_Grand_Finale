@@ -43,6 +43,26 @@ point. It reproduces our generator's canvas exactly and i4c's to within 8 nm (0.
 Same 50 pairs afterwards: **48 of 48 within 1 px, 84.12 of 85** (84.53 once the pose
 grid below was fixed as well).
 
+### …but the two generators disagree on how the canvas relates to the pose
+
+`canvas_size_for(z, θ) = 1000·z·(cos θ + sin θ) + 8` is how **our** generator builds its
+canvas: it grows with rotation so the rotated field stays covered. The organisers' i4c
+generator always renders a **1000·z** canvas and rotates *inside* a padded copy of it. With
+rotation on, the wrong convention adds a θ-dependent centre offset to every point of the
+pose search and biases the rotation it finds. Measured on fresh sets:
+
+| convention | i4c, rotation ±5° | i4c, rotation 0° | ours |
+|---|---|---|---|
+| ours only (as submitted) | 12.67 / 20 | 20.00 | 20.00 |
+| i4c only | 20.00 | 20.00 | 17.25 |
+| **chosen by fit** | **20.00** | **20.00** | **20.00** |
+
+`select_convention()` runs a cheap version of the coarse search — the aligned 0.5-zoom / 1°
+grid with 3 descents, no shift estimate — under each convention and keeps the one with the
+higher whole-field R². The wrong convention lowers the best fit sharply, so the cheap look is
+enough; running the full search under both was also right on 36 of 36 pairs, but cost
+2.4–4.0 s. The full search then runs once, under the winner.
+
 ### The coarse pose grid has to be aligned, and finer than the peak
 
 Two separate ways the whole-field fit can start in the wrong place, both measured:
@@ -93,8 +113,22 @@ one-hot correlation (layer identity is the signal; binary occupancy alone peaks 
 against ~10⁶ rivals), rasterised at 2 nm and area-pooled to 8 nm. 4 nm aliased thin fins
 and picked the wrong peak on 2 of 16 sites.
 
-Multi-peak with NMS: the strongest peak is trusted, and a near-equal runner-up marks a
-genuine design repeat that lowers confidence.
+### The 8 nm search finds the copy; a 1 nm check decides it
+
+Multi-peak with NMS, then the top 3 peaks are **re-checked at full 1 nm resolution**
+(`fine_match`): the reference's label raster is compared pixel for pixel against the search
+design at that origin, after a ±8 nm alignment search.
+
+This matters because layouts repeat. At 8 nm, a similar-but-different stretch of layout
+looks like a near-tie (0.94–0.99 of the best peak), and the SEM image cannot separate the two
+either. At 1 nm the true copy matches **exactly** — 1.0000 on every pair checked — while the
+near-copies reach 0.8751–0.9729.
+
+When one peak matches at ≥ 0.99 and beats the next by ≥ 0.01, the answer is **locked** to it
+and the SEM only refines the position within that copy (`predict()` reads `cad_lock`). As
+submitted, the final pick was made on SEM similarity instead, and on the organisers' own
+generator it chose a near-copy on **4 of 26** present pairs, 54–77 px from the truth — while
+the geometry had already ranked the true copy first on every one of them.
 
 ## 3. The local cue — per-layer signed edge fitting
 
@@ -136,10 +170,18 @@ evidence, into a presence head; Platt-calibrated with an F1-optimal threshold sa
 weights bundle.
 
 Before training the peak value alone is at chance on Phase 3 (AUC 0.41–0.53) while **PSR
-reaches AUC 0.925**, so an untrained head would be worthless. The shipped fallback
-therefore uses the geometry score directly — `top_sigma · (1 − runner_up)` — which
-measured **F1 1.000 / AUC 1.000** on the 24-pair absent-heavy set and 0.990 / 0.969 on the
-50-pair set.
+reaches AUC 0.925**, so an untrained head would be worthless. The shipped fallback uses the
+geometry directly: **the 1 nm match of the best CAD peak** — how much of the reference's
+design the search design reproduces exactly. Present, the true copy matches; absent, the
+reference came from somewhere else and nothing reproduces it.
+
+On the development sets (48 new i4c pairs, rotation on and off, plus our 24-pair
+absent-heavy set) the classes do not overlap: present **0.9993–1.0000**, absent
+**0.7440–0.8981**. The threshold, 0.95, sits in that gap and was chosen on those sets only.
+
+As submitted, presence was `top_sigma · (1 − runner_up)`, which reads a similar layout
+elsewhere as "the design repeats" and marks a present pair down. The organisers' layouts
+repeat constantly, and at the submitted threshold it rejected **7 of 26** present pairs.
 
 ## 6. Sub-pixel and refinement
 
@@ -169,10 +211,13 @@ See `GROUND-TRUTH-CONVENTION.md`.
 | band-pass (DoG) prefilter | pose 0.870 vs 0.935 plain |
 | Anscombe VST, median 3×3 | no gain at the chosen σ |
 | local pose re-estimation in global mode | scale error 0.01% → 0.19% |
+| SEM tone-map R² at the prediction as the presence score | AUC 0.942 on i4c but 0.554 on ours — generator-specific |
+| running the full pose search under both canvas conventions | right 36/36, but 2.4–4.0 s; replaced by a cheap selection pass |
 
 ## Efficiency
 
-3.7 s per pair end to end on 4 CPU threads, against a 5 s median budget and a 20 s hard
-timeout. Three changes got there from ~9 s: one shared 2 nm CAD raster pooled to
+4.5–4.8 s per pair end to end on 4 CPU threads, against a 5 s median budget and a 20 s
+hard timeout. The post-submission fixes cost about +1.1 s: the convention selection pass and
+the 1 nm checks (~0.25 s for three peaks). Three changes got there from ~9 s: one shared 2 nm CAD raster pooled to
 every level (was rebuilding an 11,000 px canvas four times — 4.6 s of 6.3 s), normal
 equations instead of `lstsq`, and pose pruning for the 25-pose variant.

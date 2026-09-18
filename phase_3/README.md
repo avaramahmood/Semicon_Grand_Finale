@@ -32,19 +32,26 @@ truth. The three steps are:
    rotation are a least-squares fit over all 1,000,000 pixels, solving the 8 per-layer greys
    at every candidate pose. The search starts from an aligned 0.25-zoom / 0.5° grid and
    descends from its 5 best cells, because the true R² peak is narrower than any coarser
-   grid and a periodic layout creates a false ridge beside it. Pose credit **20.00 / 20**
-   on every set, including the organisers' own generator.
-2. **Location from geometry.** Both CADs share a frame, so finding the reference design
-   inside the search design is noise-free — no SEM involved. Multi-peak with NMS; a
-   near-equal runner-up marks a genuine design repeat and lowers confidence.
+   grid and a periodic layout creates a false ridge beside it. Because the two generators
+   we know build their canvas differently under rotation, a cheap first pass picks the
+   canvas convention that fits the image better. Pose credit **20.00 / 20** on every set,
+   including the organisers' own generator with rotation on.
+2. **Location from geometry, decided at 1 nm.** Both CADs share a frame, so finding the
+   reference design inside the search design is noise-free — no SEM involved. The top
+   matches are re-checked pixel for pixel at 1 nm: the true copy reproduces the reference
+   **exactly**, while look-alike stretches of layout reach only 87–97%. When one match is
+   exact, the answer is locked to it and the SEM only refines the position within it.
 3. **Match on edges.** A per-layer *signed* dx/dy gradient fit. A flat "all boundaries
    equal" map is the wrong template, because a real SEM's step at a boundary depends on
    which two layers meet there. Per-layer fitting was worth +21.7 points over flat, and
    signed over magnitude a further +6.8.
 
 Brightness never drives the match. The per-layer grey fit is computed — with no grey ever
-assumed, the 8 levels and a background offset are unknowns recovered from the image — and
-its R² and residual feed the **confidence score**, which is what calibration is scored on.
+assumed, the 8 levels and a background offset are unknowns recovered from the image.
+
+**Presence is the 1 nm design match**: how much of the reference the search design
+reproduces exactly at the best match. Present pairs score 0.9993–1.0000, absent ones at most
+0.8981 on the development sets; the found threshold is 0.95.
 
 `METHODS.md` has the measurements behind each step, including what was tried and rejected.
 
@@ -54,20 +61,37 @@ its R² and residual feed the **confidence score**, which is what calibration is
 
 | set | pairs | total /85 | localization /40 | pose /20 | rejection /15 | calibration /10 | s/pair |
 |---|---|---|---|---|---|---|---|
-| train split | 50 (48 present) | 84.53 | 40.00 · 48/48 ≤1 px | **20.00** | 14.85 | 9.69 | 3.73 |
-| **blind split** | 50 | **84.20** | 39.67 · 46/48 ≤1 px | **20.00** | 14.85 | 9.69 | 3.67 |
-| absent-heavy | 24 (14 absent) | **85.00** | **40.00** · 10/10 ≤1 px | **20.00** | **15.00** | **10.00** | 3.66 |
+| train split | 50 (48 present) | **85.00** | 40.00 · 48/48 ≤1 px | **20.00** | **15.00** | **10.00** | 4.67 |
+| **blind split** | 50 | **84.67** | 39.67 · 46/48 ≤1 px | **20.00** | **15.00** | **10.00** | 4.76 |
+| absent-heavy ¹ | 24 (14 absent) | **85.00** | **40.00** · 10/10 ≤1 px | **20.00** | **15.00** | **10.00** | 4.63 |
 
 **The blind row is the real number** — the only one measured under the scored condition,
 with `reference_sem_path` and `params_json_path` empty. The 0.33 point gap to the train
 split is the scan-drift correction falling back to a nominal shear instead of reading the
 pair's real one from `params.json`; two pairs cross the 1 px line, both in x.
 
-Every present pair across all three sets is inside **2 px**, and **pose is full credit
-everywhere** — scale and rotation both 1.000.
+¹ One of the development sets the presence threshold was chosen on, so its rejection score
+is not independent. The other two rows were not used for any tuning.
 
-Efficiency: **3.66–3.73 s median**, 5.03 s worst, against a 5 s median budget and a 20 s
-hard timeout, on 4 CPU threads.
+Rejection is scored as F1 **on the found flag we output**, as the spec defines it.
+
+### Tested on data it never saw — including the organisers' own generator
+
+A fresh clone of this repo, a clean Python 3.12 install from `requirements.txt`, and four sets
+from seeds never used before: our generator, and **the organisers' `drift-sense-i4c`
+generator** with its rotation off (its default) and on.
+
+| fresh set | pairs | as submitted | **now** | ≤1 px | pose /20 |
+|---|---|---|---|---|---|
+| our generator | 40 | 84.00 | **84.51** | 33/33 | 20.00 |
+| **i4c, rotation 0°** | 32 | 72.09 | **85.00** | 26/26 | 20.00 |
+| **i4c, rotation ±5°** | 32 | 63.76 | **85.00** | 24/24 | 20.00 |
+
+The whole difference comes from two fixes described below — deciding the copy at 1 nm, and
+choosing the canvas convention — and the presence score that came with the first.
+
+Efficiency: **4.6–4.8 s median**, 5.95 s worst, against a 5 s median budget and a 20 s hard
+timeout, on 4 CPU threads.
 
 Reproduce any row: `python score.py --truth <set>/ground_truth.csv --pred results/<file>.csv`.
 
@@ -111,10 +135,11 @@ from [8, 12] and rotation from [-5, 5] degrees, search greys usually *not* the y
 so brightness genuinely has to be inferred, and a uniqueness gate requiring the true pose's
 image-wide peak to land on the label with no rival above 92%.
 
-## Three bugs worth knowing about
+## Five bugs worth knowing about
 
-All three were found only by running against real `.gds` files through a real entry point,
-and each would have cost real points while looking perfect in development.
+The first three were found by running against real `.gds` files through a real entry point.
+The last two were found after submission, by testing a fresh clone on the organisers' own
+generator — the one test that exposes assumptions tuned on our own data.
 
 1. **The canvas size is not in the GDS.** The design polygons overflow the rendered canvas,
    so taking the canvas size from the polygon bounding box put the CAD→SEM mapping out by
@@ -140,6 +165,19 @@ and each would have cost real points while looking perfect in development.
 
    Blind split 83.62 → **84.20**, absent-heavy set 82.60 → **85.00**, for +0.55 s per pair.
    `METHODS.md §1`.
+4. **We let the SEM overrule an exact geometry match.** The final pick was made on how well
+   the SEM image matched, and in a noisy image a 93–97%-similar stretch of layout looks the
+   same as the real one. On the organisers' generator that chose a near-copy on 4 of 26
+   pairs, 54–77 px off, though the geometry had ranked the true copy first every time. The
+   same blur made the old presence score reject 7 of 26 present pairs. Now the copy is
+   decided at 1 nm, where the truth matches exactly. `METHODS.md §2, §5`.
+5. **Our canvas convention was not theirs under rotation.** Ours grows the canvas with
+   rotation; theirs does not. With rotation on, pose fell to 12.67 / 20. The convention is
+   now chosen by fit. `METHODS.md §1`.
+
+We also found our own scorer had graded rejection at the best threshold for each test set
+rather than on the found flag. On every number published here the two agreed; the scorer
+now uses the found flag.
 
 ## Known gaps
 
@@ -147,11 +185,12 @@ and each would have cost real points while looking perfect in development.
   directory. A manifest stored elsewhere would need a `--root` flag.
 - **An empty `search_gds_path` is untested.** The code falls back to a 25-pose grid; it
   should work but would run ~10 s/pair — inside the 20 s timeout, outside the budget.
-- **Rejection rests on 16 absent pairs** across both sets. F1 1.000 on the absent-heavy set
-  is encouraging, not established.
-- **Time headroom is smaller than before.** The pose fix costs +0.55 s: median 3.67 s,
-  worst 5.03 s, against a 5 s *median* budget. Fine for the rubric, but a slower judging
-  machine eats into it.
+- **Very repetitive layouts can still be flagged absent.** When many CAD matches tie at
+  8 nm, the true copy can fall outside the three re-checked at 1 nm; the position is still
+  right but presence misses it (1 of 33 present pairs on our fresh set). The fix — also
+  checking the location actually answered — is known but not applied.
+- **Time headroom is small.** Median 4.6–4.8 s, worst 5.95 s, against a 5 s *median*
+  budget. Inside the rubric, but a slower judging machine eats into it.
 - **Three open questions for the organisers**, none answerable from `drift-sense-i4c`:
   whether the blind set's scale really varies (that code cannot vary it), what rotation
   range it uses (its CLI can only emit 0°), and which generator produces it at all —
