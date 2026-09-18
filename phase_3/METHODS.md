@@ -40,7 +40,46 @@ scale error of 20–48%** (median 25.85%, against 0.072% on the pairs that worke
 The fix is to stop guessing and derive it: the search image is 1000 px at `zoom` nm/px, so
 `cs = canvas_size_for(z, θ)` is a function of the candidate pose, evaluated at every grid
 point. It reproduces our generator's canvas exactly and i4c's to within 8 nm (0.4 px).
-Same 50 pairs afterwards: **48 of 48 within 1 px, 84.12 of 85.**
+Same 50 pairs afterwards: **48 of 48 within 1 px, 84.12 of 85** (84.53 once the pose
+grid below was fixed as well).
+
+### The coarse pose grid has to be aligned, and finer than the peak
+
+Two separate ways the whole-field fit can start in the wrong place, both measured:
+
+**The grid was offset by half a step.** It ran `np.arange(7.75, 12.26, 0.5)` and
+`np.arange(-5.5, 5.51, 1.0)`, which provably never sample zoom **10.0** or rotation
+**0.0** — exactly and only what the i4c CAD generator emits (`SCALE_FACTOR` is pinned at
+10 and `search_rotation_deg` defaults to 0).
+
+**The peak is narrower than the grid step.** Measured half-width in zoom: **±0.05** on
+i4c, ±0.14 to ±0.22 on ours, against a grid whose worst-case distance to a sample is 0.25.
+So the true basin is not merely missed, it is unreachable from any neighbour.
+
+What the search found instead was a broad, flat **aliasing ridge** — a periodic mat/strip
+layout admits several (zoom, rotation) pairs that correlate similarly with the field, and
+at grid resolution the ridge outscores the true peak. On a real i4c pair the grid picked
+zoom 9.75, θ +1.5 at R² **0.227**, against R² **0.846** at the truth. Single-axis
+coordinate descent then climbs the ridge and has no way back.
+
+The signature was unmistakable once looked for: **all 12 real pairs converged to the same
+θ = ±0.415°**, because the ridge geometry comes from the pitch, which is the same on every
+sample of an architecture.
+
+The fix is both halves — a grid **aligned** on round values and **finer** (0.25 zoom,
+0.5°), plus a short descent from each of the best `COARSE_STARTS = 5` cells keeping the
+best final R². Measured on both generators:
+
+| | i4c, θ ≤ 0.25° | ours, θ ≤ 0.25° | s/pair |
+|---|---|---|---|
+| offset grid, 1 start (old) | **0 / 12** | 17 / 23 | 0.32 |
+| aligned, 1 start | 12 / 12 | 18 / 23 | 0.31 |
+| **aligned + finer + 5 starts** | **12 / 12** | **23 / 23** | 1.10 |
+
+End to end this took Phase 3 from 83.62 to **84.20** on the blind split and from pose
+16.00/20 to **20.00/20** on the i4c files, for +0.55 s per pair. Localization was never
+affected — the location comes from CAD-to-CAD geometry, which does not depend on the pose
+fit — which is exactly why the bug survived every earlier test.
 
 A residual translation estimator (`_shift_estimate`, phase correlation of the fitted
 render against the SEM) stays as the safety net for whatever the blind set's framing
@@ -133,7 +172,7 @@ See `GROUND-TRUTH-CONVENTION.md`.
 
 ## Efficiency
 
-2.9–3.4 s per pair end to end on 4 CPU threads, against a 5 s median budget and a 20 s
-hard timeout. Three changes got there from ~9 s: one shared 2 nm CAD raster pooled to
+3.7 s per pair end to end on 4 CPU threads, against a 5 s median budget and a 20 s hard
+timeout. Three changes got there from ~9 s: one shared 2 nm CAD raster pooled to
 every level (was rebuilding an 11,000 px canvas four times — 4.6 s of 6.3 s), normal
 equations instead of `lstsq`, and pose pruning for the 25-pose variant.

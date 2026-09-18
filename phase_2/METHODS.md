@@ -1,4 +1,4 @@
-# Phase 2 revised — method
+# Phase 2 — method
 
 Register an SEM reference against a noisy SEM search image. Both sides are images, so
 there is no design file and no per-layer brightness to infer — the whole problem is
@@ -48,7 +48,7 @@ and rotation.
 A head over the raw pose-surface statistics — peak, margin, entropy, standard deviation
 and PSR — rather than the peak value alone, because no single statistic is reliable across
 conditions. Platt-calibrated after training, with an F1-optimal threshold chosen on
-held-out validation. Both are saved in the checkpoint, so `phase2.py --threshold` defaults
+held-out validation. Both are saved in the checkpoint, so `register.py --threshold` defaults
 to the bundle's value.
 
 PSR is the strongest single statistic (AUC 0.939 on the edge variant), which is why it is

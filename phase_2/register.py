@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drift-Sense Phase 2 — register an SEM reference against an SEM search image.
 
-    python phase2.py --input pairs.csv --output predictions.csv
+    python register.py --input pairs.csv --output predictions.csv
 
 Reads `pair_id, search_path, reference_path` and writes
 `pair_id, x, y, theta, scale, found, score`. Paths resolve relative to the directory
@@ -93,7 +93,7 @@ def main(argv=None):
     root = os.path.dirname(os.path.abspath(args.input))
     with open(args.input, newline='') as f:
         rows = list(csv.DictReader(f))
-    print(f'[phase2] {len(rows)} pairs | {os.path.basename(args.weights)} '
+    print(f'[register] {len(rows)} pairs | {os.path.basename(args.weights)} '
           f'({stagea.cfg.get("variant")}) | threshold {thr:.4f} | {args.threads} threads',
           file=sys.stderr, flush=True)
 
@@ -114,7 +114,7 @@ def main(argv=None):
         except Exception as e:                                        # noqa: BLE001
             # a missing row scores zero, so never propagate; rejecting is the honest
             # fallback when we have no evidence the reference is there at all
-            print(f'[phase2] {pid}: {type(e).__name__}: {e} -> reject', file=sys.stderr)
+            print(f'[register] {pid}: {type(e).__name__}: {e} -> reject', file=sys.stderr)
             p = dict(x=0.0, y=0.0, theta=0.0, scale=0.0, found=0, score=0.0)
         finally:
             if have_alarm:
@@ -123,7 +123,7 @@ def main(argv=None):
         p['pair_id'] = pid
         out.append(p)
         if (n + 1) % 10 == 0:
-            print(f'[phase2] {n + 1}/{len(rows)}  median {np.median(times):.2f}s',
+            print(f'[register] {n + 1}/{len(rows)}  median {np.median(times):.2f}s',
                   file=sys.stderr, flush=True)
         gc.collect()
 
@@ -138,7 +138,7 @@ def main(argv=None):
                         'scale': round(float(p['scale']), 4),
                         'found': int(p['found']),
                         'score': round(float(p['score']), 6)})
-    print(f'[phase2] wrote {args.output}: {len(out)} rows, median '
+    print(f'[register] wrote {args.output}: {len(out)} rows, median '
           f'{np.median(times):.2f}s/pair (max {max(times):.2f}s)', file=sys.stderr)
     return 0
 

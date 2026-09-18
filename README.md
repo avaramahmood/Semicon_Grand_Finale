@@ -2,7 +2,7 @@
 
 Two submissions, one matching core.
 
-**Phase 2 revised** registers an SEM reference against an SEM search image.
+**Phase 2** registers an SEM reference against an SEM search image.
 **Phase 3** registers a GDSII design against one. Both report the same thing: where the
 reference is, at what zoom and rotation, whether it is there at all, and how confident we
 are.
@@ -11,8 +11,8 @@ are.
 
 | | scored on | result | per pair | weights |
 |---|---|---|---|---|
-| [`phase_2_revised/`](phase_2_revised/) | the organisers' 25-pair set | **83.00 / 85** | 0.90 s | trained, shipped |
-| [`phase_3/`](phase_3/) | 50-pair blind split | **83.62 / 85** | 3.12 s | none — classical |
+| [`phase_2/`](phase_2/) | the organisers' 25-pair set | **83.00 / 85** | 0.90 s | trained, shipped |
+| [`phase_3/`](phase_3/) | 50-pair blind split | **84.20 / 85** | 3.67 s | none — classical |
 
 Both run on CPU with no network, well inside the 5 s median budget and the 20 s hard
 timeout. The 85 is what a local run can compute: localization 40, pose 20, rejection 15,
@@ -24,8 +24,8 @@ and efficiency is ranked against other entrants rather than scored absolutely.
 ## Run either one
 
 ```bash
-cd phase_2_revised   &&  python -m pip install -r requirements.txt
-python phase2.py --input <dataset>/pairs.csv --output predictions.csv
+cd phase_2   &&  python -m pip install -r requirements.txt
+python register.py --input <dataset>/pairs.csv --output predictions.csv
 python score.py  --truth <dataset>/ground_truth.csv --pred predictions.csv
 ```
 
@@ -67,10 +67,10 @@ on. Registration runs on per-layer signed edges instead.
 Each package has a `method.png` walking through its pipeline on a real pair, with every
 panel a genuine intermediate rather than an illustration.
 
-## Two bugs worth reading about
+## Three bugs worth reading about
 
-Both were found only by running against real files through a real entry point, and either
-alone would have scored near zero on localization while looking perfect in development.
+All three were found only by running against real files through a real entry point, and
+each would have cost real points while looking perfect in development.
 
 - **The canvas size is not in the GDS.** The design polygons overflow the rendered canvas,
   so deriving the canvas from the polygon bounding box put the CAD→SEM mapping out by up to
@@ -79,13 +79,19 @@ alone would have scored near zero on localization while looking perfect in devel
 - **The generator's label is not where the feature is visible**, by a half-pixel downsample
   convention in both axes and by scan drift it never corrects for. Worth ~8 of the 40
   localization points. → `phase_3/NOTES.md`
+- **The coarse pose grid could never sample the organisers' pose.** It was offset by half a
+  step, so it never hit zoom 10.0 or rotation 0.0 — exactly what their generator emits —
+  and the true R² peak is narrower than the step. It locked onto an aliasing ridge from the
+  periodic layout instead, and all 12 real pairs came out at the same wrong θ = ±0.415°. An
+  aligned, finer grid with 5 restarts took pose from **16.00 to 20.00 / 20**.
+  → `phase_3/METHODS.md`
 
 ## Layout
 
 ```
-overview.png              the figure above
-phase_2_revised/          phase2.py, score.py, src/, weights/model_best.pt, results/
-phase_3/                  phase3.py, score.py, src/, results/
+overview.png    the figure above
+phase_2/        register.py, score.py, src/, weights/model_best.pt, results/
+phase_3/        phase3.py,   score.py, src/, results/
 ```
 
 Each package is self-contained: nothing outside its own directory, no build step, and

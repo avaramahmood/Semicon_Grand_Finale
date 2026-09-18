@@ -1,11 +1,11 @@
-# Drift-Sense Phase 2 (revised)
+# Drift-Sense Phase 2
 
 Register an SEM reference against a noisy SEM search image: report its centre, pose, a
 found flag and a confidence score.
 
 ```bash
 python -m pip install -r requirements.txt
-python phase2.py --input <dataset>/pairs.csv --output predictions.csv
+python register.py --input <dataset>/pairs.csv --output predictions.csv
 python score.py --truth <dataset>/ground_truth.csv --pred predictions.csv
 ```
 
@@ -100,7 +100,7 @@ anything.
 ## Layout
 
 ```
-phase2.py         entry point
+register.py       entry point
 score.py          rubric scorer
 src/dsr_core.py   candidate search, re-ranker, refinement, rubric
 weights/          model_best.pt — the shipped intensity model (3.5 MB)

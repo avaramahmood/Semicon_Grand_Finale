@@ -1,6 +1,6 @@
 # weights/
 
-`model_best.pt` — the shipped model. `phase2.py` loads it automatically; it carries its
+`model_best.pt` — the shipped model. `register.py` loads it automatically; it carries its
 own cfg, Platt calibration and F1-optimal found threshold, so the checkpoint decides the
 settings and nothing in the script needs editing.
 
